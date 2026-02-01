@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  mcp-demo:
+    build: .
+    container_name: mcp-youtube-demo
+    ports:
+      - "7681:7681"  # ttyd WebSocket for terminal
+      - "8080:8080"  # static file server
+      - "8081:8081"  # MCP bridge (HTTP)
+    environment:
+      - YOUTUBE_API_KEY=${YOUTUBE_API_KEY}
+    volumes:
+      - ./app:/app  # Map local app folder into container (bridge.js, start.sh, www/)
+    restart: unless-stopped
+    stdin_open: true
+    tty: true

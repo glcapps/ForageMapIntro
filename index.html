@@ -1,0 +1,1389 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>entertainme - literal context window</title>
+    <script src="https://unpkg.com/htmx.org@1.9.5"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/1.6.0/flowbite.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-attach@0.9.0/lib/xterm-addon-attach.js"></script>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Space+Grotesk:wght@400;600&display=swap");
+      :root {
+        --ink: #131a1c;
+        --paper: #f8f2e9;
+        --accent: #d04b2b;
+        --accent-2: #1b6d7a;
+        --panel: #ffffffcc;
+      }
+      body {
+        font-family: "Space Grotesk", sans-serif;
+        color: var(--ink);
+        background: radial-gradient(1200px circle at 15% 10%, #fff4d8 0%, transparent 60%),
+          radial-gradient(1000px circle at 90% 15%, #dff2f7 0%, transparent 55%),
+          linear-gradient(120deg, var(--paper), #e6f0f3);
+      }
+      h1,
+      h2,
+      h3 {
+        font-family: "DM Serif Display", serif;
+      }
+      .panel {
+        background: var(--panel);
+        backdrop-filter: blur(6px);
+        border: 1px solid #00000012;
+      }
+      .pill {
+        border: 1px solid #00000020;
+        border-radius: 999px;
+        padding: 2px 10px;
+        font-size: 12px;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+          "Courier New", monospace;
+      }
+      .context-window {
+        background: #fcfbf7;
+        border: 1px solid #00000012;
+        border-radius: 18px;
+        padding: 18px;
+      }
+      .context-window [data-ctx-block] {
+        border: 1px dashed #00000020;
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+      .context-window [data-ctx-title] {
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+    </style>
+  </head>
+  <body class="min-h-screen">
+    <div class="max-w-6xl mx-auto px-4 py-10 space-y-8">
+      <header class="space-y-3">
+        <div class="flex items-center gap-3">
+          <div class="w-3 h-10 bg-[color:var(--accent)] rounded-full"></div>
+          <h1 class="text-4xl">entertainme</h1>
+        </div>
+        <p class="text-lg max-w-3xl">
+          The context window below is the literal payload sent to inference. If it is not rendered
+          there, it does not exist for the model.
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <span class="pill">one inference per turn</span>
+          <span class="pill">context window = payload</span>
+          <span class="pill">tools mutate DOM</span>
+          <span class="pill">manual turn advance</span>
+        </div>
+      </header>
+
+      <main class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section class="panel rounded-2xl p-5 space-y-4 lg:col-span-1">
+          <h2 class="text-2xl">LLM + YouTube config</h2>
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold">Model</label>
+            <input
+              id="model"
+              class="w-full rounded-lg border border-black/10 px-3 py-2"
+              type="text"
+              value="fireworks/gpt-oss-20b"
+            />
+          </div>
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold">Fireworks API key</label>
+            <input
+              id="api-key"
+              class="w-full rounded-lg border border-black/10 px-3 py-2"
+              type="password"
+              placeholder="sk-..."
+            />
+          </div>
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold">Base URL</label>
+            <input
+              id="base-url"
+              class="w-full rounded-lg border border-black/10 px-3 py-2"
+              type="text"
+              value="https://api.fireworks.ai/inference/v1"
+            />
+          </div>
+          <div class="space-y-2">
+            <label class="block text-sm font-semibold">YouTube Data API key</label>
+            <input
+              id="youtube-key"
+              class="w-full rounded-lg border border-black/10 px-3 py-2"
+              type="password"
+              placeholder="AIza..."
+            />
+          </div>
+          <button
+            id="save-config"
+            class="w-full rounded-lg bg-[color:var(--accent)] text-white py-2 font-semibold"
+          >
+            Save config to localStorage
+          </button>
+          <p class="text-xs text-black/60">Keys stay local and are never committed.</p>
+          <div class="rounded-xl border border-black/10 p-4 space-y-3">
+            <h3 class="text-lg">MCP YouTube (optional)</h3>
+            <p class="text-xs text-black/60">
+              Connect to the local MCP server (ttyd) for YouTube tools.
+            </p>
+            <label class="block text-sm font-semibold">MCP WebSocket URL</label>
+            <input
+              id="mcp-ws-url"
+              class="w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
+              type="text"
+              value="ws://localhost:7681"
+            />
+            <div class="flex gap-2">
+              <button
+                id="mcp-connect"
+                class="flex-1 rounded-lg border border-black/10 px-3 py-2 text-sm font-semibold"
+              >
+                Connect MCP
+              </button>
+              <button
+                id="mcp-refresh"
+                class="flex-1 rounded-lg border border-black/10 px-3 py-2 text-sm font-semibold"
+              >
+                Refresh Tools
+              </button>
+              <button
+                id="mcp-disconnect"
+                class="flex-1 rounded-lg border border-black/10 px-3 py-2 text-sm font-semibold"
+              >
+                Disconnect
+              </button>
+            </div>
+            <div id="mcp-status" class="text-xs text-black/60">Status: disconnected.</div>
+          </div>
+        </section>
+
+        <section class="panel rounded-2xl p-5 space-y-4 lg:col-span-2">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-2xl">Meeting controls</h2>
+              <p class="text-sm text-black/60">Turns advance only when you click Next Turn.</p>
+            </div>
+            <div class="flex gap-3">
+              <button
+                id="next-turn"
+                class="rounded-lg bg-[color:var(--accent-2)] text-white px-4 py-2 font-semibold"
+              >
+                Next turn (run inference)
+              </button>
+              <button
+                id="reset-meeting"
+                class="rounded-lg border border-black/10 px-4 py-2 font-semibold"
+              >
+                Reset meeting
+              </button>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="rounded-xl border border-black/10 p-3">
+              <div class="text-xs uppercase text-black/50">Turn</div>
+              <div id="turn-count" class="text-2xl font-semibold">0</div>
+            </div>
+            <div class="rounded-xl border border-black/10 p-3">
+              <div class="text-xs uppercase text-black/50">Current actor</div>
+              <div id="current-actor" class="text-2xl font-semibold">Administrator</div>
+            </div>
+            <div class="rounded-xl border border-black/10 p-3">
+              <div class="text-xs uppercase text-black/50">Candidates</div>
+              <div id="candidate-count" class="text-2xl font-semibold">0</div>
+            </div>
+          </div>
+          <div class="rounded-xl border border-black/10 p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-xl">LLM response</h3>
+              <button
+                id="run-tool-calls"
+                class="rounded-lg border border-black/10 px-3 py-1 text-sm font-semibold"
+              >
+                Run tools + re-infer
+              </button>
+            </div>
+            <pre
+              id="llm-response"
+              class="mono text-xs whitespace-pre-wrap bg-black/5 rounded-lg p-3 min-h-[140px]"
+            >
+No response yet.</pre>
+            <div id="llm-reasoning-block" class="hidden">
+              <div class="text-xs uppercase text-black/50 mt-2">Reasoning (model-only)</div>
+              <pre
+                id="llm-reasoning"
+                class="mono text-xs whitespace-pre-wrap bg-black/5 rounded-lg p-3 mt-2"
+              ></pre>
+            </div>
+          </div>
+          <div id="meeting-status" class="text-sm text-black/60">
+            Meeting status: in progress.
+          </div>
+        </section>
+
+        <section class="panel rounded-2xl p-5 space-y-4 lg:col-span-2">
+          <div class="flex items-center justify-between">
+            <h2 class="text-2xl">Context window (literal payload)</h2>
+            <div class="text-xs text-black/50">This DOM subtree is serialized as-is.</div>
+          </div>
+          <div id="context-window" class="context-window">
+            <div data-ctx-block data-ctx-label="Context invariant" data-visible="true">
+              <div data-ctx-title>Context invariant</div>
+              <div>
+                This rendered context window is the literal payload sent to inference. If a fact or
+                instruction is not rendered here, it does not exist for the model.
+              </div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="MCP status" data-visible="true">
+              <div data-ctx-title>MCP YouTube status</div>
+              <div id="mcp-context-status">MCP: disconnected.</div>
+              <div id="mcp-context-tools" class="text-xs text-black/60"></div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Tool instructions" data-visible="true">
+              <div data-ctx-title>Tool instructions</div>
+              <div>
+                Output format: tool calls only. Do not include commentary, prose, or extra text.
+                If you have suggestions, you must update the UI via tool calls (do not list
+                recommendations without tools).
+              </div>
+              <div class="text-sm mt-2">
+                Tool glossary (what each function does):
+                <br />
+                fetchCandidates("query") = query YouTube (or mock) and replace the Candidate list.
+                <br />
+                fetchCandidatesMCP("query") = use MCP YouTube tools to fetch candidates if MCP is connected.
+                <br />
+                expandFact(id) / collapseFact(id) = show or hide a fact detail block in this window.
+                <br />
+                rankCandidates(id1, id2, id3, ...) = keep only the listed candidate ids in that
+                order (your ranked picks). All other candidates are removed.
+                <br />
+                updateSuggestions(N) = write the top N ranked candidates into Suggestions.
+                <br />
+                markSeen(videoId) = remove a candidate and append it to watch history.
+                <br />
+                addActorNote(note) = append to your private notes (only you will see later).
+                <br />
+                addWhiteboard(note) = append to shared notes (all actors see later).
+                <br />
+                addTranscript(line) = append a spoken line to the meeting transcript (use sparingly).
+                <br />
+                passTurn() = end your turn and hand control to the next actor (you are satisfied).
+                <br />
+                awaitResults() = re-run inference for the current actor after a fetch (same actor).
+                <br />
+                <span id="admin-tool-line" data-visible="false" class="hidden">
+                  finalizeMeeting(id1, id2, ...) = rank + commit + end meeting (Admin only).
+                </span>
+              </div>
+              <div class="text-sm mt-2">
+                Recommendation rule: before updateSuggestions(N), you must ensure candidates are
+                loaded and ranked for this turn. If candidates are missing or stale, call
+                fetchCandidates("your query") first.
+              </div>
+              <div class="text-sm mt-2">
+                Action rule: do not stop at filterCandidates or rankCandidates. Those are
+                intermediate steps only. If you filter/rank in a turn, you must either
+                updateSuggestions(N) in the same turn or explain via notes why you are not ready.
+              </div>
+              <div class="text-sm mt-2">
+                Fetch rule: if you call fetchCandidates(...), you will NOT see the new list until
+                the next turn. Do not call rankCandidates or updateSuggestions in the same response
+                as a fetch. Instead, fetch, optionally add notes/whiteboard/transcript, then
+                awaitResults(). When you fetch, the ONLY allowed tool calls that turn are:
+                fetchCandidates(...), addActorNote(...), addWhiteboard(...), addTranscript(...),
+                awaitResults().
+              </div>
+              <div class="text-sm mt-2">
+                Progress rule: ranking does not complete your turn. You must decide what to do next.
+                If results are weak, refine the query and fetch again; otherwise commit with
+                updateSuggestions(N) and then passTurn().
+              </div>
+              <div class="text-sm mt-2">
+                Turn process checklist:
+                <br />
+                1) Inspect visible facts + notes + candidates.
+                <br />
+                2) Decide if current candidates are sufficient. If missing/off-target, craft a new
+                query and fetch. If sufficient, proceed to filtering/ranking/committing.
+                <br />
+                3) If you need more context, expand facts before acting.
+                <br />
+                4) Rank by listing ids with rankCandidates(...), then commit with updateSuggestions(N).
+                <br />
+                5) Record reasoning via addActorNote / addWhiteboard, then passTurn().
+                <br />
+                One inference per turn: after information gathering, do a single set of tool
+                updates and end the turn (do not loop).
+              </div>
+              <div class="text-sm mt-2">
+                Choose only one: passTurn() or awaitResults(). If you fetched and need to see new
+                candidates, use awaitResults(). If you are satisfied with candidates and notes,
+                use passTurn().
+              </div>
+              <div class="text-sm mt-2">
+                Speaking rule: use addTranscript(line) only for meaningful, goal-relevant statements.
+                Skip mundane status updates. The transcript should read like a focused meeting.
+              </div>
+              <div class="text-sm mt-2">
+                Tool calls do not trigger inference; they only mutate this context window. Use
+                CALL: updateSuggestions(N) to write the top N ranked candidates into the
+                Suggestions panel. Replace placeholders with real values from the visible context
+                (e.g., use actual video ids and a realistic top-N count). Do not emit placeholder
+                arguments like (videoId) or (N).
+              </div>
+              <div class="text-sm mt-2">
+                For candidates, craft a specific query string and call fetchCandidates("...").
+                If results are off-topic, refine the query and call fetchCandidates again before
+                ranking or suggesting.
+              </div>
+              <div class="text-sm mt-2">
+                Query rule: invent a fresh query every turn using at least TWO visible facts.
+                Do not reuse or copy any query text from these instructions.
+              </div>
+              <div class="text-sm mt-2">
+                Query rubric: include (1) topic focus, (2) format hint (explainer, tutorial, recap),
+                and (3) time hint when relevant. Use your own words.
+              </div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Current actor prompt" data-visible="true">
+              <div data-ctx-title>Current actor prompt</div>
+              <div id="actor-prompt"></div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Meeting protocol" data-visible="true">
+              <div data-ctx-title>Meeting protocol</div>
+              <div>
+                You are in a round-table meeting with multiple actors:
+                Taste + History, Driving mode, Recency, Time budget, Administrator.
+                The meeting goal is to select the best entertainment for the user right now.
+                You have access to shared Whiteboard notes from all participants and your own
+                prior notes (the "Actor notes" block). Those are your only persistent memory.
+                The Administrator should open with a brief spoken goal in the transcript to
+                align the group.
+                <br /><br />
+                Matching rule: do not require every pick to satisfy all interests. Favor strong
+                overall fit; it is acceptable for a suggestion to match only one primary interest
+                (for example, LLM education OR sci-fi), as long as the list is balanced overall.
+                <br /><br />
+                Finalization: when the Administrator is satisfied, they must call
+                finalizeMeeting(id1, id2, ...) to rank picks, commit suggestions, and end the meeting.
+                <br /><br />
+                Each actor gets exactly one inference per turn.
+                You are stateless between turns: the only persistent memory is what is rendered
+                here (Whiteboard + your own notes). If it is not written, it is lost.
+                <br /><br />
+                Use tools to act. Do not narrate recommendations. To make progress:
+                fetch candidates with a specific query, expand relevant facts, filter or rank,
+                then commit picks with updateSuggestions(topN). Use addActorNote(note) for your
+                private memory and addWhiteboard(note) for shared memory.
+                <br /><br />
+                Keep the meeting moving. If you have nothing to add, output only:
+                CALL: passTurn(). You will get another turn later with updated context.
+              </div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Whiteboard" data-visible="true">
+              <div data-ctx-title>Whiteboard</div>
+              <textarea
+                id="whiteboard"
+                data-visible="true"
+                class="w-full rounded-lg border border-black/10 p-2 min-h-[90px]"
+              >
+Goal: choose entertainment that fits right now. Keep it concise and ranked.</textarea>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Meeting transcript" data-visible="true">
+              <div data-ctx-title>Meeting transcript (spoken)</div>
+              <div id="meeting-transcript" class="text-sm space-y-2">
+                No transcript lines yet.
+              </div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Actor notes" data-visible="true">
+              <div data-ctx-title>Actor notes (current only)</div>
+              <div id="actor-notes">
+                <textarea
+                  data-actor="taste"
+                  data-visible="true"
+                  class="w-full rounded-lg border border-black/10 p-2 min-h-[80px]"
+                >
+Focus on sci-fi and LLM learning. Avoid repeats.</textarea>
+                <textarea
+                  data-actor="driving"
+                  data-visible="false"
+                  class="w-full rounded-lg border border-black/10 p-2 min-h-[80px] hidden"
+                >
+If driving, audio-first, low-attention content only.</textarea>
+                <textarea
+                  data-actor="freshness"
+                  data-visible="false"
+                  class="w-full rounded-lg border border-black/10 p-2 min-h-[80px] hidden"
+                >
+Respect freshness rules. Avoid stale news.</textarea>
+                <textarea
+                  data-actor="time"
+                  data-visible="false"
+                  class="w-full rounded-lg border border-black/10 p-2 min-h-[80px] hidden"
+                >
+Keep picks in 10-20 minute range.</textarea>
+                <textarea
+                  data-actor="admin"
+                  data-visible="false"
+                  class="w-full rounded-lg border border-black/10 p-2 min-h-[80px] hidden"
+                >
+Commit final ranked list to suggestions.</textarea>
+              </div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Facts" data-visible="true">
+              <div data-ctx-title>Facts</div>
+              <div class="space-y-2">
+                <div data-ctx-label="Current time" data-visible="true" id="current-time">
+                  Current time: --:--
+                </div>
+                <div data-ctx-label="User interests summary" data-visible="true">
+                  Interests: LLM tooling, practical engineering explainers, sci-fi worldbuilding,
+                  short-form tutorials, space exploration, product design, retro tech, and systems thinking.
+                </div>
+                <div id="fact-profile" data-ctx-label="User interests details" data-visible="false" class="hidden">
+                  Prefers calm narration, structured walkthroughs, and hands-on demos. Avoids hype,
+                  clickbait, and repetitive recap content.
+                </div>
+                <div data-ctx-label="Situation summary" data-visible="true">
+                  Situation: evening, not driving, ~20 minutes available, focused attention OK.
+                </div>
+                <div id="fact-context" data-ctx-label="Situation details" data-visible="false" class="hidden">
+                  Audio is okay. Wants something relevant to current LLM learning sprint.
+                </div>
+                <div data-ctx-label="Watch history summary" data-visible="true">
+                  Watch history: LLM Agents in 15 Minutes; Expanse lore recap; Prompting patterns 101.
+                </div>
+                <div id="fact-history" data-ctx-label="Watch history details" data-visible="false" class="hidden">
+                  Avoid recommending duplicates or adjacent recaps.
+                </div>
+                <div data-ctx-label="Freshness rules summary" data-visible="true">
+                  Freshness: news must be last 7 days; evergreen explainers always OK.
+                </div>
+                <div id="fact-rules" data-ctx-label="Freshness rules details" data-visible="false" class="hidden">
+                  If a candidate is news, verify published date before ranking.
+                </div>
+              </div>
+            </div>
+
+            <div data-ctx-block data-ctx-label="Candidates" data-visible="true">
+              <div data-ctx-title>Candidate list</div>
+              <div class="text-sm text-black/70 mb-2">
+                Each candidate shows: title, channel, duration (if known), published date,
+                thumbnail, description, and id. If this list is non-empty, candidates already exist.
+                Do not say "no candidates" unless the list literally says "No candidates yet."
+              </div>
+              <div
+                id="candidate-summary"
+                data-ctx-label="Candidate summary"
+                data-visible="true"
+                class="text-sm text-black/70 mb-2"
+              >
+                Candidate count: 0. If count > 0, candidates are available to review.
+              </div>
+              <div id="candidate-list" class="space-y-2 text-sm">
+                No candidates yet. Use fetchCandidates().
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel rounded-2xl p-5 space-y-4 lg:col-span-1">
+          <h2 class="text-2xl">Context controls</h2>
+          <p class="text-sm text-black/60">
+            These buttons mutate the context window without triggering inference.
+          </p>
+          <div class="space-y-3">
+            <div class="flex gap-2">
+              <input
+                id="candidate-query"
+                class="flex-1 rounded-lg border border-black/10 px-3 py-2 text-sm"
+                type="text"
+                value="LLM tools sci-fi explainers"
+              />
+              <button
+                class="rounded-lg border border-black/10 px-3 py-2 text-sm font-semibold"
+                onclick="fetchCandidates()"
+              >
+                Fetch
+              </button>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button class="pill" onclick="expandFact('profile')">expandFact(profile)</button>
+              <button class="pill" onclick="collapseFact('profile')">collapseFact(profile)</button>
+              <button class="pill" onclick="expandFact('context')">expandFact(context)</button>
+              <button class="pill" onclick="collapseFact('context')">collapseFact(context)</button>
+              <button class="pill" onclick="expandFact('history')">expandFact(history)</button>
+              <button class="pill" onclick="collapseFact('history')">collapseFact(history)</button>
+              <button class="pill" onclick="expandFact('rules')">expandFact(rules)</button>
+              <button class="pill" onclick="collapseFact('rules')">collapseFact(rules)</button>
+              <button class="pill" onclick="updateSuggestions(5)">updateSuggestions(5)</button>
+            </div>
+          </div>
+          <div class="rounded-xl border border-black/10 p-4 space-y-3">
+            <h3 class="text-lg">Payload preview</h3>
+            <pre
+              id="context-preview"
+              class="mono text-xs whitespace-pre-wrap bg-black/5 rounded-lg p-3 min-h-[220px]"
+            ></pre>
+          </div>
+          <div class="rounded-xl border border-black/10 p-4 space-y-3">
+            <h3 class="text-lg">Suggestions</h3>
+            <div id="suggestions" class="space-y-2 text-sm text-black/70">
+              No suggestions yet.
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        turn: 0,
+        actorIndex: 0,
+        meetingEnded: false,
+        lastFetchPromise: null,
+        mcpConnected: false,
+        mcpTools: [],
+        mcpTerm: null,
+        mcpWs: null,
+        mcpBuffer: "",
+        mcpPending: new Map(),
+        actors: [
+          {
+            id: "admin",
+            label: "Administrator",
+            personality: "Facilitator, strategic and decisive.",
+            goal: "Conclude the meeting if candidates are viable; otherwise seed the query.",
+            grounding:
+              "Open the meeting with a concise spoken goal via addTranscript(...). If candidates are already viable, commit final picks with updateSuggestions(N), note the decision on the whiteboard, and passTurn(). If not, craft a precise query and fetch initial candidates.",
+          },
+          {
+            id: "taste",
+            label: "Taste + History",
+            personality: "Curious curator, precise and preference-driven.",
+            goal: "Avoid repeats and align picks to the user's taste and learning goals.",
+            grounding:
+              "Prioritize sci-fi + LLM learning. Avoid repeats or near-duplicate content.",
+          },
+          {
+            id: "driving",
+            label: "Driving mode",
+            personality: "Safety-first concierge, concise and cautious.",
+            goal: "Ensure content is safe for driving or low-attention situations.",
+            grounding: "If driving, favor audio-first, low-attention content and short summaries.",
+          },
+          {
+            id: "freshness",
+            label: "Recency",
+            personality: "News editor, skeptical of stale content.",
+            goal: "Keep recommendations fresh; enforce recency rules.",
+            grounding:
+              "News must be from the last 7 days; evergreen explainers are always OK.",
+          },
+          {
+            id: "time",
+            label: "Time budget",
+            personality: "Scheduling pragmatist, time-conscious and direct.",
+            goal: "Match picks to the user's time budget and pacing.",
+            grounding: "Prefer 10-20 minute picks for short breaks.",
+          },
+        ],
+        candidates: [],
+        rankedCandidates: [],
+        suggestions: [],
+        history: [
+          "LLM Agents in 15 Minutes",
+          "The Expanse lore recap",
+          "Prompting patterns 101",
+        ],
+      };
+
+      const mockCandidates = [
+        {
+          id: "mock-1",
+          videoId: "mock-1",
+          title: "LLM tool calling in 12 minutes",
+          channel: "Build With AI",
+          minutes: 12,
+          duration: "PT12M",
+          durationSeconds: 720,
+          description: "Practical walkthrough of tool calling patterns for production apps.",
+          thumbnail: "https://placehold.co/80x60?text=LLM",
+          publishedAt: "2024-11-02T12:00:00Z",
+          tags: ["llm", "tools", "engineering"],
+        },
+        {
+          id: "mock-2",
+          videoId: "mock-2",
+          title: "Sci-fi futures: what AI gets wrong",
+          channel: "Orbit Essays",
+          minutes: 18,
+          duration: "PT18M",
+          durationSeconds: 1080,
+          description: "Essay on sci-fi tropes vs real AI development trajectories.",
+          thumbnail: "https://placehold.co/80x60?text=Sci-Fi",
+          publishedAt: "2024-10-15T09:30:00Z",
+          tags: ["sci-fi", "essay", "future"],
+        },
+        {
+          id: "mock-3",
+          videoId: "mock-3",
+          title: "RAG vs fine-tuning explained simply",
+          channel: "Explain ML",
+          minutes: 14,
+          duration: "PT14M",
+          durationSeconds: 840,
+          description: "Clear comparison of retrieval augmentation and fine-tuning tradeoffs.",
+          thumbnail: "https://placehold.co/80x60?text=RAG",
+          publishedAt: "2024-11-05T17:45:00Z",
+          tags: ["llm", "rag", "education"],
+        },
+        {
+          id: "mock-4",
+          videoId: "mock-4",
+          title: "Foundation season 2 recap",
+          channel: "Sci-Fi Weekly",
+          minutes: 22,
+          duration: "PT22M",
+          durationSeconds: 1320,
+          description: "Recap of major plot points and character arcs.",
+          thumbnail: "https://placehold.co/80x60?text=Recap",
+          publishedAt: "2024-08-21T14:10:00Z",
+          tags: ["sci-fi", "recap"],
+        },
+        {
+          id: "mock-5",
+          videoId: "mock-5",
+          title: "The memory limits of chatbots",
+          channel: "Systems Lab",
+          minutes: 16,
+          duration: "PT16M",
+          durationSeconds: 960,
+          description: "Why stateless inference changes UX and orchestration patterns.",
+          thumbnail: "https://placehold.co/80x60?text=Memory",
+          publishedAt: "2024-11-08T08:20:00Z",
+          tags: ["llm", "systems"],
+        },
+      ];
+
+      function saveConfig() {
+        localStorage.setItem("entertainme.model", getValue("model"));
+        localStorage.setItem("entertainme.apiKey", getValue("api-key"));
+        localStorage.setItem("entertainme.baseUrl", getValue("base-url"));
+        localStorage.setItem("entertainme.youtubeKey", getValue("youtube-key"));
+        localStorage.setItem("entertainme.mcpUrl", getValue("mcp-ws-url"));
+      }
+
+      function loadConfig() {
+        setValue("model", localStorage.getItem("entertainme.model") || "fireworks/gpt-oss-20b");
+        setValue("api-key", localStorage.getItem("entertainme.apiKey") || "");
+        setValue(
+          "base-url",
+          localStorage.getItem("entertainme.baseUrl") ||
+            "https://api.fireworks.ai/inference/v1"
+        );
+        setValue("youtube-key", localStorage.getItem("entertainme.youtubeKey") || "");
+        setValue("mcp-ws-url", localStorage.getItem("entertainme.mcpUrl") || "ws://localhost:7681");
+      }
+
+      function setValue(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.value = value;
+      }
+
+      function getValue(id) {
+        const el = document.getElementById(id);
+        return el ? el.value.trim() : "";
+      }
+
+      function updateCounts() {
+        document.getElementById("turn-count").textContent = state.turn;
+        document.getElementById("current-actor").textContent = state.actors[state.actorIndex].label;
+        document.getElementById("candidate-count").textContent = state.candidates.length;
+        const summary = document.getElementById("candidate-summary");
+        if (summary) {
+          summary.textContent = `Candidate count: ${state.candidates.length}. If count > 0, candidates are available to review.`;
+        }
+      }
+
+      function setActorVisibility(actorId) {
+        document.querySelectorAll("#actor-notes textarea").forEach((note) => {
+          const isCurrent = note.dataset.actor === actorId;
+          note.dataset.visible = isCurrent ? "true" : "false";
+          note.classList.toggle("hidden", !isCurrent);
+        });
+      }
+
+      function updateActorPrompt() {
+        const actor = state.actors[state.actorIndex];
+        const node = document.getElementById("actor-prompt");
+        if (!node) return;
+        node.textContent = `Actor: ${actor.label}. Personality: ${actor.personality} Goal: ${actor.goal} Grounding: ${actor.grounding}`;
+      }
+
+      function updateAdminToolVisibility() {
+        const actor = state.actors[state.actorIndex];
+        const line = document.getElementById("admin-tool-line");
+        if (!line) return;
+        const isAdmin = actor.id === "admin";
+        line.dataset.visible = isAdmin ? "true" : "false";
+        line.classList.toggle("hidden", !isAdmin);
+        updateContextPreview();
+      }
+
+      function toggleFact(id, isVisible) {
+        const node = document.getElementById(`fact-${id}`);
+        if (!node) return;
+        const show = typeof isVisible === "boolean" ? isVisible : node.classList.contains("hidden");
+        node.classList.toggle("hidden", !show);
+        node.dataset.visible = show ? "true" : "false";
+        updateContextPreview();
+      }
+
+      function expandFact(id) {
+        toggleFact(id, true);
+      }
+
+      function collapseFact(id) {
+        toggleFact(id, false);
+      }
+
+      function resetContextWindow() {
+        ["profile", "context", "history", "rules"].forEach((id) => collapseFact(id));
+        setActorVisibility(state.actors[state.actorIndex].id);
+        updateActorPrompt();
+        updateAdminToolVisibility();
+        updateContextPreview();
+      }
+
+      function renderCandidates() {
+        const list = document.getElementById("candidate-list");
+        if (!state.candidates.length) {
+          list.textContent = "No candidates yet. Use fetchCandidates().";
+          return;
+        }
+        list.innerHTML = "";
+        state.candidates.forEach((item) => {
+          const row = document.createElement("div");
+          row.className = "flex items-center justify-between gap-2 rounded-lg bg-white/60 p-2";
+          row.dataset.videoId = item.id;
+          row.innerHTML = `
+            <div class="flex items-start gap-3">
+              <img
+                src="${item.thumbnail || "https://placehold.co/80x60?text=Video"}"
+                alt="thumbnail"
+                class="w-20 h-14 rounded-md object-cover border border-black/10"
+              />
+              <div>
+              <div class="font-semibold">${item.title}</div>
+              <div class="text-xs text-black/50">
+                ${item.channel || "Unknown"}${item.minutes ? " • " + item.minutes + " min" : ""}${item.duration ? " • " + item.duration : ""}${item.publishedAt ? " • " + new Date(item.publishedAt).toLocaleDateString() : ""}
+              </div>
+              <div class="text-xs text-black/50">id: ${item.id}</div>
+              <div class="text-xs text-black/70 mt-1">${item.description || "No description available."}</div>
+              </div>
+            </div>
+            <button class="text-xs font-semibold text-[color:var(--accent)]" onclick="markSeen('${item.id}')">markSeen</button>
+          `;
+          list.appendChild(row);
+        });
+      }
+
+      function parseIsoDurationToSeconds(iso) {
+        if (!iso || typeof iso !== "string") return null;
+        const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        if (!match) return null;
+        const hours = Number(match[1] || 0);
+        const minutes = Number(match[2] || 0);
+        const seconds = Number(match[3] || 0);
+        return hours * 3600 + minutes * 60 + seconds;
+      }
+
+      function fetchCandidates(queryOverride) {
+        const youtubeKey = getValue("youtube-key");
+        const query = (queryOverride && String(queryOverride).trim()) || getValue("candidate-query") || "LLM sci-fi explainers";
+        if (queryOverride) setValue("candidate-query", query);
+        if (!youtubeKey) {
+          state.candidates = [...mockCandidates];
+          state.rankedCandidates = [];
+          renderCandidates();
+          updateCounts();
+          updateContextPreview();
+          state.lastFetchPromise = Promise.resolve();
+          return state.lastFetchPromise;
+        }
+        const url =
+          "https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=8&q=" +
+          encodeURIComponent(query) +
+          "&key=" +
+          encodeURIComponent(youtubeKey);
+        const fetchPromise = fetch(url)
+          .then((res) => res.json())
+          .then((data) => {
+            const ids = Array.isArray(data.items)
+              ? data.items.map((item) => item.id?.videoId).filter(Boolean)
+              : [];
+            if (!ids.length) {
+              state.candidates = [...mockCandidates];
+              state.rankedCandidates = [];
+              renderCandidates();
+              updateCounts();
+              updateContextPreview();
+              return;
+            }
+            const videosUrl =
+              "https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=" +
+              encodeURIComponent(ids.join(",")) +
+              "&key=" +
+              encodeURIComponent(youtubeKey);
+            return fetch(videosUrl)
+              .then((res) => res.json())
+              .then((videoData) => {
+                const items = Array.isArray(videoData.items) ? videoData.items : [];
+                state.candidates = items.map((item) => {
+                  const duration = item.contentDetails?.duration || null;
+                  const durationSeconds = parseIsoDurationToSeconds(duration);
+                  return {
+                    id: item.id,
+                    videoId: item.id,
+                    title: item.snippet?.title || "Untitled",
+                    channel: item.snippet?.channelTitle || "Unknown",
+                    minutes: durationSeconds ? Math.round(durationSeconds / 60) : null,
+                    duration,
+                    durationSeconds,
+                    description: item.snippet?.description || "",
+                    thumbnail: item.snippet?.thumbnails?.default?.url || "",
+                    publishedAt: item.snippet?.publishedAt || "",
+                    tags: [item.snippet?.channelTitle || ""],
+                  };
+                });
+                state.rankedCandidates = [];
+                renderCandidates();
+                updateCounts();
+                updateContextPreview();
+              });
+          })
+          .catch(() => {
+            state.candidates = [...mockCandidates];
+            renderCandidates();
+            updateCounts();
+            updateContextPreview();
+          });
+        state.lastFetchPromise = fetchPromise;
+        return fetchPromise;
+      }
+
+      function fetchCandidatesMCP(queryOverride) {
+        const query = (queryOverride && String(queryOverride).trim()) || getValue("candidate-query") || "LLM sci-fi explainers";
+        if (queryOverride) setValue("candidate-query", query);
+        if (!state.mcpConnected || !state.mcpTools.includes("search_videos")) {
+          state.candidates = [...mockCandidates];
+          state.rankedCandidates = [];
+          renderCandidates();
+          updateCounts();
+          updateContextPreview();
+          state.lastFetchPromise = Promise.resolve();
+          return state.lastFetchPromise;
+        }
+        const fetchPromise = mcpSend("tools/call", {
+          name: "search_videos",
+          arguments: { query, maxResults: 8 },
+        })
+          .then((res) => {
+            const payload = res.result || {};
+            const items = payload.items || payload.videos || payload.results || [];
+            state.candidates = items.map((item) => ({
+              id: item.videoId || item.id || item.video_id || "",
+              videoId: item.videoId || item.id || item.video_id || "",
+              title: item.title || item.name || "Untitled",
+              channel: item.channelTitle || item.channel || "Unknown",
+              minutes: null,
+              duration: item.duration || null,
+              durationSeconds: parseIsoDurationToSeconds(item.duration || ""),
+              description: item.description || "",
+              thumbnail: item.thumbnailUrl || item.thumbnail || "",
+              publishedAt: item.publishedAt || item.published_at || "",
+              tags: [],
+            }));
+            state.rankedCandidates = [];
+            renderCandidates();
+            updateCounts();
+            updateContextPreview();
+          })
+          .catch(() => {
+            state.candidates = [...mockCandidates];
+            renderCandidates();
+            updateCounts();
+            updateContextPreview();
+          });
+        state.lastFetchPromise = fetchPromise;
+        return fetchPromise;
+      }
+
+      function rankCandidates(...ids) {
+        const normalized = ids.map((id) => String(id).trim()).filter(Boolean);
+        const ordered = [];
+        normalized.forEach((id) => {
+          const match = state.candidates.find((item) => item.id === id || item.videoId === id);
+          if (match) ordered.push(match);
+        });
+        state.rankedCandidates = ordered;
+        state.candidates = ordered;
+        renderCandidates();
+        updateCounts();
+        updateContextPreview();
+      }
+
+      function updateSuggestions(topN) {
+        const source = state.rankedCandidates.length ? state.rankedCandidates : state.candidates;
+        state.suggestions = source.slice(0, topN);
+        const list = document.getElementById("suggestions");
+        if (!state.suggestions.length) {
+          list.textContent = "No suggestions yet.";
+          return;
+        }
+        list.innerHTML = "";
+        state.suggestions.forEach((item, idx) => {
+          const row = document.createElement("div");
+          row.className = "rounded-lg bg-white/70 p-2";
+          row.textContent = `${idx + 1}. ${item.title}`;
+          list.appendChild(row);
+        });
+        updateContextPreview();
+      }
+
+      function addActorNote(note) {
+        const currentActor = state.actors[state.actorIndex].id;
+        const node = document.querySelector(`#actor-notes textarea[data-actor="${currentActor}"]`);
+        if (!node || !note) return;
+        const trimmed = note.trim();
+        if (!trimmed) return;
+        node.value = `${node.value.trim()}\n- ${trimmed}`.trim();
+        updateContextPreview();
+      }
+
+      function addWhiteboard(note) {
+        const node = document.getElementById("whiteboard");
+        if (!node || !note) return;
+        const trimmed = note.trim();
+        if (!trimmed) return;
+        node.value = `${node.value.trim()}\n- ${trimmed}`.trim();
+        updateContextPreview();
+      }
+
+      function addTranscript(line) {
+        const node = document.getElementById("meeting-transcript");
+        if (!node || !line) return;
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        if (node.textContent.trim() === "No transcript lines yet.") {
+          node.textContent = "";
+        }
+        const entry = document.createElement("div");
+        entry.textContent = trimmed;
+        node.appendChild(entry);
+        updateContextPreview();
+      }
+
+      function awaitResults() {
+        // No-op marker; runToolCalls will trigger re-inference.
+      }
+
+      function passTurn() {
+        const button = document.getElementById("next-turn");
+        if (button) button.click();
+      }
+
+      function endMeeting() {
+        state.meetingEnded = true;
+        const status = document.getElementById("meeting-status");
+        if (status) status.textContent = "Meeting status: concluded.";
+        const nextTurn = document.getElementById("next-turn");
+        const runTools = document.getElementById("run-tool-calls");
+        if (nextTurn) nextTurn.disabled = true;
+        if (runTools) runTools.disabled = true;
+      }
+
+      function finalizeMeeting(...ids) {
+        const normalized = ids.map((id) => String(id).trim()).filter(Boolean);
+        if (normalized.length) {
+          rankCandidates(...normalized);
+          updateSuggestions(normalized.length);
+        }
+        endMeeting();
+      }
+
+      function markSeen(videoId) {
+        const item = state.candidates.find((c) => c.id === videoId);
+        if (item) state.history.push(item.title);
+        state.candidates = state.candidates.filter((c) => c.id !== videoId);
+        renderCandidates();
+        updateCounts();
+        const historyNode = document.getElementById("fact-history");
+        if (historyNode) {
+          historyNode.textContent = `Avoid recommending: ${state.history.join(", ")}.`;
+        }
+        updateContextPreview();
+      }
+
+      function serializeContextWindow() {
+        const root = document.getElementById("context-window");
+        const clone = root.cloneNode(true);
+        clone.querySelectorAll("[data-visible='false'], .hidden").forEach((node) => node.remove());
+        return clone.outerHTML.trim();
+      }
+
+      function updateContextPreview() {
+        document.getElementById("context-preview").textContent = serializeContextWindow();
+      }
+
+      function updateMcpStatus() {
+        const status = document.getElementById("mcp-status");
+        const ctxStatus = document.getElementById("mcp-context-status");
+        const ctxTools = document.getElementById("mcp-context-tools");
+        const connected = state.mcpConnected ? "connected" : "disconnected";
+        if (status) status.textContent = `Status: ${connected}.`;
+        if (ctxStatus) ctxStatus.textContent = `MCP: ${connected}.`;
+        if (ctxTools) {
+          if (state.mcpTools.length) {
+            ctxTools.textContent = `Tools: ${state.mcpTools.join(", ")}`;
+          } else if (state.mcpConnected) {
+            ctxTools.textContent =
+              "Tools: (pending). Expected for YouTube MCP: search_videos, get_video_details, get_channel_stats, get_video_transcript, get_playlist_videos.";
+          } else {
+            ctxTools.textContent = "Tools: (none)";
+          }
+        }
+        updateContextPreview();
+      }
+
+      function sanitizeMcpLine(line) {
+        return line
+          .replace(/\r/g, "")
+          .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+          .trim();
+      }
+
+      function handleMcpLine(line) {
+        const cleaned = sanitizeMcpLine(line);
+        if (!cleaned) return;
+        let msg;
+        try {
+          msg = JSON.parse(cleaned);
+        } catch {
+          return;
+        }
+        const pending = state.mcpPending.get(msg.id);
+        if (pending) {
+          state.mcpPending.delete(msg.id);
+          pending.resolve(msg);
+        }
+        const tools = msg.result?.tools;
+        if (Array.isArray(tools)) {
+          state.mcpTools = tools.map((tool) => tool.name).filter(Boolean);
+          updateMcpStatus();
+        }
+      }
+
+      function mcpSend(method, params) {
+        if (!state.mcpTerm) return Promise.reject(new Error("MCP not connected"));
+        const id = Date.now() + Math.floor(Math.random() * 1000);
+        const payload = { jsonrpc: "2.0", method, params, id };
+        return new Promise((resolve, reject) => {
+          state.mcpPending.set(id, { resolve, reject });
+          state.mcpTerm.write(JSON.stringify(payload) + "\n");
+          setTimeout(() => {
+            if (state.mcpPending.has(id)) {
+              state.mcpPending.delete(id);
+              reject(new Error("MCP request timed out"));
+            }
+          }, 8000);
+        });
+      }
+
+      async function connectMcp() {
+        const url = getValue("mcp-ws-url") || "ws://localhost:7681";
+        if (state.mcpWs) return;
+        const ws = new WebSocket(url);
+        state.mcpWs = ws;
+        updateMcpStatus();
+        ws.onopen = async () => {
+          const term = new window.Terminal({ rows: 24, cols: 80 });
+          const attachAddon = new window.AttachAddon.AttachAddon(ws);
+          term.loadAddon(attachAddon);
+          state.mcpTerm = term;
+          state.mcpConnected = true;
+          updateMcpStatus();
+          term.onData((data) => {
+            state.mcpBuffer += data;
+            const parts = state.mcpBuffer.split("\n");
+            state.mcpBuffer = parts.pop() || "";
+            parts.forEach((line) => {
+              if (line.trim()) handleMcpLine(line.trim());
+            });
+          });
+          try {
+            await mcpSend("initialize", {
+              protocolVersion: "2024-11-05",
+              capabilities: {},
+              clientInfo: { name: "entertainme-demo", version: "1.0.0" },
+            });
+            await refreshMcpTools();
+          } catch (err) {
+            console.error(err);
+          }
+        };
+        ws.onerror = () => {
+          state.mcpConnected = false;
+          updateMcpStatus();
+        };
+        ws.onclose = () => {
+          state.mcpConnected = false;
+          state.mcpWs = null;
+          state.mcpTerm = null;
+          updateMcpStatus();
+        };
+      }
+
+      function disconnectMcp() {
+        if (state.mcpWs) state.mcpWs.close();
+        state.mcpWs = null;
+        state.mcpTerm = null;
+        state.mcpConnected = false;
+        updateMcpStatus();
+      }
+
+      function refreshMcpTools() {
+        if (!state.mcpConnected) return Promise.resolve();
+        return mcpSend("tools/list").then((msg) => {
+          const tools = msg.result?.tools;
+          if (Array.isArray(tools)) {
+            state.mcpTools = tools.map((tool) => tool.name).filter(Boolean);
+            updateMcpStatus();
+          }
+        });
+      }
+
+      function sanitizeModelOutput(text) {
+        const marker = "<|start|>assistant<|channel|>final<|channel|>analysis<|message|>";
+        let cleaned = text || "";
+        if (cleaned.includes(marker)) {
+          const parts = cleaned.split(marker);
+          cleaned = parts[1] || "";
+        }
+        cleaned = cleaned.replaceAll("<|return|>", "").trim();
+        return cleaned;
+      }
+
+      function updateCurrentTime() {
+        const node = document.getElementById("current-time");
+        if (!node) return;
+        const now = new Date();
+        node.textContent = `Current time: ${now.toLocaleString()}`;
+      }
+
+      function buildSystemPrompt() {
+        const actor = state.actors[state.actorIndex];
+        return `You are the ${actor.label} actor in a turn-based meeting.
+Respond with tool calls only. Do not include commentary or prose.
+If you have suggestions, you MUST rankCandidates(id1, id2, ...) and then updateSuggestions(N) to commit them to the UI.
+Use passTurn() only when you are satisfied with candidates and your notes/transcript updates are complete.
+If you call fetchCandidates(...), do not rank or update suggestions in the same response because you have not seen the results yet.
+During a fetch turn, only use: fetchCandidates(...), addActorNote(...), addWhiteboard(...), addTranscript(...), passTurn().
+Choose only one of passTurn() or awaitResults() to end your turn.
+Do not list recommendations in plain text without tool calls.
+Tool format: CALL: toolName(arg1, arg2) one per line.
+You are part of a round-table; use addActorNote(note) for your notes, addWhiteboard(note) for shared notes, and addTranscript(line) for meaningful spoken lines.
+You will receive another turn later with updated context.
+Do not request another inference.`;
+      }
+
+      function parseToolCalls(text) {
+        const calls = [];
+        const marker = "TOOL_CALLS_START";
+        const splitText = text.includes(marker) ? text.split(marker).slice(1).join(marker) : text;
+        const trimmed = splitText.trim();
+        if (trimmed.startsWith("{") && trimmed.includes("\"tool_calls\"")) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed.tool_calls)) {
+              parsed.tool_calls.forEach((call) => {
+                if (!call || !call.name) return;
+                calls.push({ name: call.name, args: call.arguments || "" });
+              });
+            }
+          } catch (err) {
+            // Fall through to line parsing.
+          }
+        }
+        const lines = text.split("\n");
+        lines.forEach((line) => {
+          const match = line.match(/^CALL:\s*([a-zA-Z0-9_]+)\((.*)\)\s*$/);
+          if (!match) return;
+          calls.push({ name: match[1], args: match[2] });
+        });
+        lines.forEach((line) => {
+          const match = line.match(/^([a-zA-Z0-9_]+):\s*(.+)\s*$/);
+          if (!match) return;
+          const name = match[1];
+          if (name !== "addActorNote" && name !== "addWhiteboard" && name !== "addTranscript") return;
+          calls.push({ name, args: match[2] });
+        });
+        return calls;
+      }
+
+      function runToolCalls() {
+        const text = document.getElementById("llm-response").textContent || "";
+        const calls = parseToolCalls(text);
+        let shouldPassTurn = false;
+        let shouldAwaitResults = false;
+        let shouldEndMeeting = false;
+        let didFetch = false;
+        calls.forEach((call) => {
+          if (typeof window[call.name] !== "function") return;
+          let args = [];
+          if (call.name === "addActorNote" || call.name === "addWhiteboard" || call.name === "addTranscript") {
+            const raw = String(call.args || "").trim().replace(/^"|"$/g, "").replace(/^'|'$/g, "");
+            if (raw) args = [raw];
+          } else {
+            args = call.args.trim()
+              ? call.args
+                  .split(",")
+                  .map((arg) => arg.trim().replace(/^"|"$/g, "").replace(/^'|'$/g, ""))
+              : [];
+          }
+          window[call.name](...args);
+          if (call.name === "passTurn") shouldPassTurn = true;
+          if (call.name === "awaitResults") shouldAwaitResults = true;
+          if (call.name === "endMeeting" || call.name === "finalizeMeeting") shouldEndMeeting = true;
+          if (call.name === "fetchCandidates") didFetch = true;
+        });
+        if (shouldEndMeeting) return;
+        if (shouldPassTurn) {
+          const button = document.getElementById("next-turn");
+          if (button) button.click();
+          return;
+        }
+        if (shouldAwaitResults) {
+          const promise = state.lastFetchPromise;
+          if (promise && typeof promise.then === "function") {
+            promise.then(() => runInference());
+          } else {
+            runInference();
+          }
+          return;
+        }
+        const hasToolCalls = calls.length > 0;
+        if (hasToolCalls && !didFetch) runInference();
+      }
+
+      function nextTurn() {
+        if (state.turn === 0) {
+          state.turn = 1;
+        } else {
+          state.turn += 1;
+          state.actorIndex = (state.actorIndex + 1) % state.actors.length;
+        }
+        resetContextWindow();
+        updateCounts();
+        updateCurrentTime();
+        runInference();
+      }
+
+      function runInference() {
+        if (state.meetingEnded) {
+          document.getElementById("llm-response").textContent = "Meeting concluded.";
+          return;
+        }
+        const apiKey = getValue("api-key");
+        const baseUrl = getValue("base-url").replace(/\/$/, "");
+        const model = getValue("model");
+        if (!apiKey || !baseUrl || !model) {
+          document.getElementById("llm-response").textContent = "Missing model, API key, or base URL.";
+          return;
+        }
+        const reasoningBlock = document.getElementById("llm-reasoning-block");
+        const reasoningNode = document.getElementById("llm-reasoning");
+        if (reasoningBlock && reasoningNode) {
+          reasoningNode.textContent = "";
+          reasoningBlock.classList.add("hidden");
+        }
+        const payload = {
+          model,
+          messages: [
+            { role: "system", content: serializeContextWindow() },
+            {
+              role: "user",
+              content:
+                "Think about your role and call the appropriate functions with appropriate parameters.",
+            },
+          ],
+          temperature: 0.2,
+        };
+        document.getElementById("llm-response").textContent = "Running inference...";
+        fetch(`${baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(payload),
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            const content = data.choices?.[0]?.message?.content || JSON.stringify(data, null, 2);
+            document.getElementById("llm-response").textContent = sanitizeModelOutput(content);
+            const reasoning = data.choices?.[0]?.message?.reasoning_content;
+            const reasoningBlock = document.getElementById("llm-reasoning-block");
+            const reasoningNode = document.getElementById("llm-reasoning");
+            if (reasoning && reasoningBlock && reasoningNode) {
+              reasoningNode.textContent = reasoning;
+              reasoningBlock.classList.remove("hidden");
+            } else if (reasoningBlock && reasoningNode) {
+              reasoningNode.textContent = "";
+              reasoningBlock.classList.add("hidden");
+            }
+          })
+          .catch((err) => {
+            document.getElementById("llm-response").textContent = `Error: ${err.message}`;
+          });
+      }
+
+      document.getElementById("save-config").addEventListener("click", saveConfig);
+      document.getElementById("next-turn").addEventListener("click", nextTurn);
+      document.getElementById("reset-meeting").addEventListener("click", () => {
+        state.turn = 0;
+        state.actorIndex = 0;
+        resetContextWindow();
+        updateCounts();
+        document.getElementById("llm-response").textContent = "No response yet.";
+      });
+      document.getElementById("run-tool-calls").addEventListener("click", runToolCalls);
+      document.getElementById("mcp-connect").addEventListener("click", connectMcp);
+      document.getElementById("mcp-refresh").addEventListener("click", refreshMcpTools);
+      document.getElementById("mcp-disconnect").addEventListener("click", disconnectMcp);
+
+      loadConfig();
+      updateMcpStatus();
+      updateCurrentTime();
+      resetContextWindow();
+      updateCounts();
+      updateContextPreview();
+    </script>
+  </body>
+</html>

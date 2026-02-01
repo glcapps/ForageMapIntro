@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP YouTube Demo - Connection Test</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      color: #333;
+    }
+    .status {
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 5px;
+      background: white;
+      border-left: 4px solid #4CAF50;
+    }
+    .console-output {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      max-height: 400px;
+      overflow-y: auto;
+      margin: 20px 0;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px 0;
+      border-bottom: 1px solid #333;
+    }
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+    .icon {
+      margin-right: 8px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎬 MCP YouTube Demo - Connection Test</h1>
+  
+  <div class="status">
+    <strong>📡 Status:</strong> <span id="status">Initializing...</span>
+  </div>
+
+  <p><strong>Instructions:</strong></p>
+  <ul>
+    <li>Open browser DevTools Console (F12) for detailed logs</li>
+    <li>This page tests the MCP connection automatically</li>
+    <li>Debug terminal available at: <a id="debugLink" href="#" target="_blank"></a></li>
+  </ul>
+
+  <div class="console-output" id="output"></div>
+
+  <script>
+    // Simple console output display
+    const outputDiv = document.getElementById('output');
+    const statusSpan = document.getElementById('status');
+
+    // Debug terminal is always ttyd on :7681. The MCP bridge is HTTP on a different port (default :8081).
+    const debugLink = document.getElementById('debugLink');
+    const debugOrigin = `${location.protocol}//${location.hostname}:7681`;
+    debugLink.href = debugOrigin;
+    debugLink.textContent = debugOrigin;
+
+    function log(emoji, message, data = null) {
+      console.log(`${emoji} ${message}`, data || '');
+      
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = `<span class="icon">${emoji}</span>${message}`;
+      if (data) {
+        entry.innerHTML += `<br><pre style="margin: 5px 0 0 24px; color: #ce9178;">${JSON.stringify(data, null, 2)}</pre>`;
+      }
+      outputDiv.appendChild(entry);
+      outputDiv.scrollTop = outputDiv.scrollHeight;
+    }
+
+
+    // Marker so we can tell exactly which version of the page is running
+    log('🧪', 'Debug build loaded', { file: 'ytmcp.html', ts: new Date().toISOString(), defaultBridge: 'http://127.0.0.1:8081/mcp' });
+
+    // Auto-executing MCP connection test (HTTP bridge)
+    (async () => {
+      // The bridge is now HTTP (not WS). We POST JSON-RPC requests and display JSON responses.
+      // By default we talk to the same-origin bridge path. If your bridge is on a different port,
+      // set window.MCP_BRIDGE_ORIGIN from DevTools (e.g., "http://localhost:6781").
+
+      // If the HTML is served from an unrelated dev server (e.g., :5500),
+      // default the bridge to the Docker-exposed HTTP port instead of location.origin.
+      // You can override via:
+      //   window.MCP_BRIDGE_ORIGIN = "http://127.0.0.1:8081"
+      //   window.MCP_BRIDGE_PATH   = "/mcp"
+      // or by using the small UI inputs we render below.
+      // --- Bridge defaults (HTTP POST) ---
+      // This page may be served from anywhere (e.g. :5500). The bridge lives in the container.
+      // Default to the container-exposed bridge at http://127.0.0.1:8081/mcp.
+      // Override via localStorage UI below or via window.MCP_BRIDGE_ORIGIN / window.MCP_BRIDGE_PATH.
+
+      // Persisted overrides (so you don't have to keep typing them)
+      const storedOrigin = localStorage.getItem('MCP_BRIDGE_ORIGIN') || '';
+      const storedPath   = localStorage.getItem('MCP_BRIDGE_PATH') || '';
+
+      const suggestedBridgeOrigins = [
+        'http://127.0.0.1:8081',
+        'http://localhost:8081',
+        'http://127.0.0.1:8080',
+        'http://localhost:8080',
+        'http://127.0.0.1:8787',
+        'http://localhost:8787',
+        'http://127.0.0.1:3000',
+        'http://localhost:3000'
+      ];
+
+      const suggestedBridgePaths = ['/mcp', '/rpc', '/api/mcp'];
+
+      // If the user didn't explicitly override origin/path, we can auto-try other likely origins.
+      const originIsOverridden = !!(window.MCP_BRIDGE_ORIGIN || storedOrigin);
+      const pathIsOverridden   = !!(window.MCP_BRIDGE_PATH || storedPath);
+
+      async function tryPostOnce(url, json) {
+        // Try a single POST; return { ok, status, text, headers }
+        let res;
+        try {
+          res = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: json
+          });
+        } catch (e) {
+          return { ok: false, status: 0, text: String(e), headers: null, error: e };
+        }
+        const text = await res.text();
+        return { ok: res.ok, status: res.status, text, headers: res.headers, error: null };
+      }
+
+      async function discoverWorkingBridge(json) {
+        // Probe origins/paths until something is NOT 404/405.
+        // We accept any 2xx, and also accept 400/500 etc as "bridge exists" (means route is real).
+        const candidates = [];
+
+        // Prefer same origin as the debug terminal host if you opened ttyd in a different hostname.
+        const host = location.hostname || '127.0.0.1';
+        const proto = location.protocol || 'http:';
+
+        // If user is using localhost vs 127.0.0.1, try both.
+        const hostVariants = Array.from(new Set([
+          host,
+          host === 'localhost' ? '127.0.0.1' : 'localhost'
+        ]));
+
+        // Start with the currently configured bridgeOrigin/bridgePath.
+        candidates.push({ origin: bridgeOrigin, path: bridgePath });
+
+        // Then add common origins + common paths.
+        for (const o of suggestedBridgeOrigins) {
+          for (const p of (pathIsOverridden ? [bridgePath] : suggestedBridgePaths)) {
+            candidates.push({ origin: o, path: p });
+          }
+        }
+
+        // Also try current hostname on likely ports.
+        const portHints = ['8081', '8080', '8787', '3000', '5000', '5173'];
+        for (const h of hostVariants) {
+          for (const port of portHints) {
+            const o = `${proto}//${h}:${port}`;
+            for (const p of (pathIsOverridden ? [bridgePath] : suggestedBridgePaths)) {
+              candidates.push({ origin: o, path: p });
+            }
+          }
+        }
+
+        // De-dupe
+        const seen = new Set();
+        const uniq = [];
+        for (const c of candidates) {
+          const key = c.origin.replace(/\/$/, '') + c.path;
+          if (!seen.has(key)) { seen.add(key); uniq.push(c); }
+        }
+
+        log('🧭', 'Auto-discovery: probing bridge candidates', { count: uniq.length });
+
+        for (const c of uniq) {
+          const url = c.origin.replace(/\/$/, '') + c.path;
+          log('🔎', 'Probe POST', { url });
+          const r = await tryPostOnce(url, json);
+          // Status 0 = network / CORS / refused
+          if (r.status === 0) continue;
+          // Treat 404/405 as "not a bridge here"
+          if (r.status === 404 || r.status === 405) continue;
+
+          log('✅', 'Auto-discovery selected bridge', { url, status: r.status });
+          // Persist selection so reloads work
+          const selectedOrigin = c.origin;
+          const selectedPath = c.path;
+          localStorage.setItem('MCP_BRIDGE_ORIGIN', selectedOrigin);
+          localStorage.setItem('MCP_BRIDGE_PATH', selectedPath);
+
+          // Update UI inputs live (no reload required)
+          const oi = document.getElementById('bridgeOriginInput');
+          const pi = document.getElementById('bridgePathInput');
+          if (oi) oi.value = selectedOrigin;
+          if (pi) pi.value = selectedPath;
+
+          return { selectedOrigin, selectedPath, selectedUrl: url, firstResponse: r };
+        }
+
+        return null;
+      }
+
+
+      const defaultBridgeOrigin = 'http://127.0.0.1:8081';
+
+      const bridgeOrigin =
+        (window.MCP_BRIDGE_ORIGIN && String(window.MCP_BRIDGE_ORIGIN)) ||
+        (storedOrigin && String(storedOrigin)) ||
+        defaultBridgeOrigin;
+
+      const bridgePath =
+        (window.MCP_BRIDGE_PATH && String(window.MCP_BRIDGE_PATH)) ||
+        (storedPath && String(storedPath)) ||
+        '/mcp';
+
+      const bridgeUrl = bridgeOrigin.replace(/\/$/, '') + bridgePath;
+
+      // Tiny config UI so the page can be served from anywhere (like :5500) and still hit Docker.
+      const cfg = document.createElement('div');
+      cfg.style.cssText = 'background:#fff;border-radius:6px;padding:10px;margin:12px 0;border:1px solid #ddd;';
+      cfg.innerHTML = `
+        <div style="font-weight:600;margin-bottom:6px;">Bridge settings (HTTP)</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <label style="display:flex;flex-direction:column;gap:4px;min-width:260px;">
+            <span style="font-size:12px;color:#555;">Bridge origin</span>
+            <input id="bridgeOriginInput" style="padding:6px;border:1px solid #ccc;border-radius:4px;" />
+          </label>
+          <label style="display:flex;flex-direction:column;gap:4px;min-width:140px;">
+            <span style="font-size:12px;color:#555;">Path</span>
+            <input id="bridgePathInput" style="padding:6px;border:1px solid #ccc;border-radius:4px;" />
+          </label>
+          <button id="bridgeSaveBtn" style="padding:8px 10px;border:1px solid #333;border-radius:4px;background:#333;color:#fff;cursor:pointer;">
+            Save & reload
+          </button>
+          <button id="bridgeResetBtn" style="padding:8px 10px;border:1px solid #999;border-radius:4px;background:#fff;color:#333;cursor:pointer;">
+            Reset
+          </button>
+        </div>
+        <div style="font-size:12px;color:#666;margin-top:6px;">
+          Tip: If you're serving this page from <code>:5500</code>, you still POST to the container bridge.
+          Start with <code>http://127.0.0.1:8081/mcp</code> (bridge) and open <code>http://127.0.0.1:7681</code> for the ttyd terminal.
+          If you get <code>404</code>/<code>405</code>, you're probably on the wrong port/path (often a static server).
+        </div>
+      `;
+      // Insert UI just above the console output panel
+      outputDiv.parentNode.insertBefore(cfg, outputDiv);
+
+      const originInput = document.getElementById('bridgeOriginInput');
+      const pathInput   = document.getElementById('bridgePathInput');
+      originInput.value = bridgeOrigin;
+      pathInput.value   = bridgePath;
+
+      document.getElementById('bridgeSaveBtn').addEventListener('click', () => {
+        localStorage.setItem('MCP_BRIDGE_ORIGIN', originInput.value.trim());
+        localStorage.setItem('MCP_BRIDGE_PATH', pathInput.value.trim() || '/rpc');
+        location.reload();
+      });
+
+      document.getElementById('bridgeResetBtn').addEventListener('click', () => {
+        localStorage.removeItem('MCP_BRIDGE_ORIGIN');
+        localStorage.removeItem('MCP_BRIDGE_PATH');
+        location.reload();
+      });
+
+      // Very visible, to avoid the prior confusion.
+      log('🧭', 'Bridge config', { pageOrigin: location.origin, bridgeOrigin, bridgePath, bridgeUrl });
+
+      // Helper: POST a JSON-RPC object to the bridge, with auto-discovery fallback.
+      async function rpc(obj) {
+        const json = JSON.stringify(obj);
+
+        // Always compute current bridgeUrl from the *current* input values (live edits) if present.
+        const oi = document.getElementById('bridgeOriginInput');
+        const pi = document.getElementById('bridgePathInput');
+        const liveOrigin = (oi && oi.value && oi.value.trim()) ? oi.value.trim() : bridgeOrigin;
+        const livePath   = (pi && pi.value && pi.value.trim()) ? pi.value.trim() : bridgePath;
+        const liveUrl    = liveOrigin.replace(/\/$/, '') + livePath;
+
+        log('➡️', 'POST JSON-RPC to bridge', { url: liveUrl, len: json.length, preview: json.slice(0, 240) });
+
+        let r = await tryPostOnce(liveUrl, json);
+
+        // If user didn't override and we hit 404/405, try to discover the real bridge.
+        if (!originIsOverridden && (r.status === 404 || r.status === 405)) {
+          log('🧭', 'Bridge returned 404/405; attempting auto-discovery', { status: r.status, url: liveUrl });
+          const found = await discoverWorkingBridge(json);
+          if (found) {
+            // Re-run on selected URL to get a fresh response for the actual call
+            const rerunUrl = found.selectedUrl;
+            log('➡️', 'Retrying JSON-RPC on discovered bridge', { url: rerunUrl });
+            r = await tryPostOnce(rerunUrl, json);
+          }
+        }
+
+        // Extra diagnostics for common "static server" misroutes
+        if (!r.ok && (r.status === 404 || r.status === 405)) {
+          log('🧯', 'Bridge diagnostics', {
+            status: r.status,
+            hint: (r.status === 404)
+              ? '404 usually means wrong port/path (often a static server).'
+              : '405 usually means server exists but does not accept POST here.',
+          });
+        }
+
+        if (!r.ok) {
+          // Always surface the body/headers on errors (e.g., 504) so we can see what the bridge is doing.
+          const headerDump = {};
+          try {
+            if (r.headers && typeof r.headers.forEach === 'function') {
+              r.headers.forEach((v, k) => { headerDump[k] = v; });
+            }
+          } catch {}
+
+          log('❌', 'Bridge returned HTTP error', {
+            status: r.status,
+            ok: r.ok,
+            url: liveUrl,
+            headers: headerDump,
+            bodyPreview: (r.text || '').slice(0, 1200)
+          });
+
+          const hint =
+            (r.status === 0)
+              ? 'Network/CORS/refused. Is the bridge port published to the host?'
+              : (r.status === 404)
+                ? 'No handler at this URL. Confirm your bridge is actually listening and exposing POST on this route.'
+                : (r.status === 405)
+                  ? 'Method not allowed. Confirm your bridge supports POST on this route.'
+                  : (r.status === 504)
+                    ? 'Gateway timeout from the bridge. This usually means the bridge is waiting for a stdio response that never arrives (framing/stdio wiring), or its internal timeout is too short.'
+                    : '';
+
+          throw new Error(`HTTP ${r.status}${hint ? ' - ' + hint : ''}`);
+        }
+
+        // Try JSON parse, but tolerate non-JSON.
+        try {
+          const parsed = JSON.parse(r.text);
+          log('📥', 'Bridge response', parsed);
+          return parsed;
+        } catch {
+          log('📥', 'Bridge response (non-JSON)', { status: r.status, bodyPreview: (r.text || '').slice(0, 800) });
+          return r.text;
+        }
+      }
+
+      try {
+        statusSpan.textContent = 'Talking to bridge...';
+
+        // Test 1: initialize
+        const initRequest = {
+          jsonrpc: '2.0',
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'demo-client', version: '1.0.0' }
+          },
+          id: 1
+        };
+
+        statusSpan.textContent = 'Sending initialize...';
+        log('📤', 'Sending MCP initialize request', initRequest);
+        await rpc(initRequest);
+
+        // Small delay so logs are readable
+        await new Promise((resolve) => setTimeout(resolve, 250));
+
+        // Test 2: tools/list
+        const toolsRequest = { jsonrpc: '2.0', method: 'tools/list', id: 2 };
+        statusSpan.textContent = 'Requesting tools list...';
+        log('📤', 'Sending tools/list request', toolsRequest);
+        await rpc(toolsRequest);
+
+        statusSpan.textContent = 'Test complete ✨';
+        log('✨', 'Connection test complete! Responses (if any) will appear above.');
+
+        // Expose helpers for manual console testing
+        window.mcpRpc = rpc;
+        console.log('💡 Bridge RPC helper available as window.mcpRpc(obj)');
+        console.log('💡 Override bridge origin with window.MCP_BRIDGE_ORIGIN = "http://localhost:6781" (then refresh)');
+        console.log('💡 Override path with window.MCP_BRIDGE_PATH = "/mcp" (then refresh)');
+      } catch (err) {
+        statusSpan.textContent = 'Failed ❌';
+        log('💥', 'Connection test failed', { message: String(err), stack: err && err.stack ? String(err.stack) : undefined });
+        console.error('Connection failed:', err);
+      }
+    })();
+  </script>
+</body>
+</html>
