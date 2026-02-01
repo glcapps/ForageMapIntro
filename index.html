@@ -240,9 +240,20 @@ No response yet.</pre>
             </div>
 
             <div data-ctx-block data-ctx-label="MCP status" data-visible="true">
-              <div data-ctx-title>MCP YouTube status</div>
-              <div id="mcp-context-status">MCP: disconnected.</div>
-              <div id="mcp-context-tools" class="text-xs text-black/60"></div>
+            <div data-ctx-title>MCP YouTube status</div>
+            <div id="mcp-context-status">MCP: disconnected.</div>
+            <div id="mcp-context-tools" class="text-xs text-black/60"></div>
+            <div id="mcp-context-last" class="text-xs text-black/60"></div>
+          </div>
+
+            <div data-ctx-block data-ctx-label="MCP usage" data-visible="true">
+              <div data-ctx-title>Youtube MCP use instructions</div>
+              <div>
+                Use CALL: callMcpTool("tool_name", { ...args }) to invoke MCP tools via the HTTP
+                bridge. Only run one MCP call at a time because this UI shows only the most recent
+                MCP query/response. If you need to remember details from a response, write them
+                immediately with addActorNote(...) or addWhiteboard(...).
+              </div>
             </div>
 
             <div data-ctx-block data-ctx-label="Tool instructions" data-visible="true">
@@ -558,6 +569,8 @@ Commit final ranked list to suggestions.</textarea>
         mcpConnected: false,
         mcpTools: [],
         mcpBridgeUrl: "",
+        mcpLastRequest: null,
+        mcpLastResponse: null,
         actors: [
           {
             id: "admin",
@@ -898,10 +911,7 @@ Commit final ranked list to suggestions.</textarea>
           state.lastFetchPromise = Promise.resolve();
           return state.lastFetchPromise;
         }
-        const fetchPromise = mcpSend("tools/call", {
-          name: "search_videos",
-          arguments: { query, maxResults: 8 },
-        })
+        const fetchPromise = callMcpTool("search_videos", { query, maxResults: 8 })
           .then((res) => {
             const payload = res.result || {};
             const items = payload.items || payload.videos || payload.results || [];
@@ -1054,6 +1064,7 @@ Commit final ranked list to suggestions.</textarea>
         const status = document.getElementById("mcp-status");
         const ctxStatus = document.getElementById("mcp-context-status");
         const ctxTools = document.getElementById("mcp-context-tools");
+        const ctxLast = document.getElementById("mcp-context-last");
         const connected = state.mcpConnected ? "connected" : "disconnected";
         if (status) status.textContent = `Status: ${connected}.`;
         if (ctxStatus) ctxStatus.textContent = `MCP: ${connected}.`;
@@ -1065,6 +1076,19 @@ Commit final ranked list to suggestions.</textarea>
               "Tools: (pending). Expected for YouTube MCP: search_videos, get_video_details, get_channel_stats, get_video_transcript, get_playlist_videos.";
           } else {
             ctxTools.textContent = "Tools: (none)";
+          }
+        }
+        if (ctxLast) {
+          if (state.mcpLastRequest || state.mcpLastResponse) {
+            const req = state.mcpLastRequest
+              ? JSON.stringify(state.mcpLastRequest, null, 2)
+              : "(none)";
+            const res = state.mcpLastResponse
+              ? JSON.stringify(state.mcpLastResponse, null, 2)
+              : "(none)";
+            ctxLast.textContent = `Last MCP query: ${req}\nLast MCP response: ${res}`;
+          } else {
+            ctxLast.textContent = "Last MCP query: (none)\nLast MCP response: (none)";
           }
         }
         updateContextPreview();
@@ -1102,6 +1126,17 @@ Commit final ranked list to suggestions.</textarea>
           });
       }
 
+      function callMcpTool(name, args = {}) {
+        const payload = { name, arguments: args || {} };
+        state.mcpLastRequest = { method: "tools/call", params: payload };
+        updateMcpStatus();
+        return mcpSend("tools/call", payload).then((msg) => {
+          state.mcpLastResponse = msg;
+          updateMcpStatus();
+          return msg;
+        });
+      }
+
       async function connectMcp() {
         const url = getValue("mcp-bridge-url") || "http://127.0.0.1:8081/mcp";
         state.mcpBridgeUrl = url;
@@ -1124,17 +1159,23 @@ Commit final ranked list to suggestions.</textarea>
       function disconnectMcp() {
         state.mcpBridgeUrl = "";
         state.mcpConnected = false;
+        state.mcpLastRequest = null;
+        state.mcpLastResponse = null;
         updateMcpStatus();
       }
 
       function refreshMcpTools() {
         if (!state.mcpConnected) return Promise.resolve();
+        state.mcpLastRequest = { method: "tools/list", params: {} };
+        updateMcpStatus();
         return mcpSend("tools/list").then((msg) => {
           const tools = msg.result?.tools;
           if (Array.isArray(tools)) {
             state.mcpTools = tools.map((tool) => tool.name).filter(Boolean);
             updateMcpStatus();
           }
+          state.mcpLastResponse = msg;
+          updateMcpStatus();
         });
       }
 
