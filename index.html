@@ -7,8 +7,6 @@
     <script src="https://unpkg.com/htmx.org@1.9.5"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/flowbite/1.6.0/flowbite.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-attach@0.9.0/lib/xterm-addon-attach.js"></script>
     <style>
       @import url("https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Space+Grotesk:wght@400;600&display=swap");
       :root {
@@ -131,14 +129,14 @@
           <div class="rounded-xl border border-black/10 p-4 space-y-3">
             <h3 class="text-lg">MCP YouTube (optional)</h3>
             <p class="text-xs text-black/60">
-              Connect to the local MCP server (ttyd) for YouTube tools.
+              Connect to the local MCP HTTP bridge for YouTube tools.
             </p>
-            <label class="block text-sm font-semibold">MCP WebSocket URL</label>
+            <label class="block text-sm font-semibold">MCP Bridge URL</label>
             <input
-              id="mcp-ws-url"
+              id="mcp-bridge-url"
               class="w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
               type="text"
-              value="ws://localhost:7681"
+              value="http://127.0.0.1:8081/mcp"
             />
             <div class="flex gap-2">
               <button
@@ -559,10 +557,7 @@ Commit final ranked list to suggestions.</textarea>
         lastFetchPromise: null,
         mcpConnected: false,
         mcpTools: [],
-        mcpTerm: null,
-        mcpWs: null,
-        mcpBuffer: "",
-        mcpPending: new Map(),
+        mcpBridgeUrl: "",
         actors: [
           {
             id: "admin",
@@ -686,7 +681,7 @@ Commit final ranked list to suggestions.</textarea>
         localStorage.setItem("entertainme.apiKey", getValue("api-key"));
         localStorage.setItem("entertainme.baseUrl", getValue("base-url"));
         localStorage.setItem("entertainme.youtubeKey", getValue("youtube-key"));
-        localStorage.setItem("entertainme.mcpUrl", getValue("mcp-ws-url"));
+        localStorage.setItem("entertainme.mcpBridgeUrl", getValue("mcp-bridge-url"));
       }
 
       function loadConfig() {
@@ -698,7 +693,10 @@ Commit final ranked list to suggestions.</textarea>
             "https://api.fireworks.ai/inference/v1"
         );
         setValue("youtube-key", localStorage.getItem("entertainme.youtubeKey") || "");
-        setValue("mcp-ws-url", localStorage.getItem("entertainme.mcpUrl") || "ws://localhost:7681");
+        setValue(
+          "mcp-bridge-url",
+          localStorage.getItem("entertainme.mcpBridgeUrl") || "http://127.0.0.1:8081/mcp"
+        );
       }
 
       function setValue(id, value) {
@@ -1072,98 +1070,59 @@ Commit final ranked list to suggestions.</textarea>
         updateContextPreview();
       }
 
-      function sanitizeMcpLine(line) {
-        return line
-          .replace(/\r/g, "")
-          .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
-          .trim();
-      }
-
-      function handleMcpLine(line) {
-        const cleaned = sanitizeMcpLine(line);
-        if (!cleaned) return;
-        let msg;
-        try {
-          msg = JSON.parse(cleaned);
-        } catch {
-          return;
-        }
-        const pending = state.mcpPending.get(msg.id);
-        if (pending) {
-          state.mcpPending.delete(msg.id);
-          pending.resolve(msg);
-        }
-        const tools = msg.result?.tools;
-        if (Array.isArray(tools)) {
-          state.mcpTools = tools.map((tool) => tool.name).filter(Boolean);
-          updateMcpStatus();
-        }
-      }
-
       function mcpSend(method, params) {
-        if (!state.mcpTerm) return Promise.reject(new Error("MCP not connected"));
+        if (!state.mcpConnected) return Promise.reject(new Error("MCP not connected"));
+        const url = state.mcpBridgeUrl || getValue("mcp-bridge-url") || "http://127.0.0.1:8081/mcp";
         const id = Date.now() + Math.floor(Math.random() * 1000);
         const payload = { jsonrpc: "2.0", method, params, id };
-        return new Promise((resolve, reject) => {
-          state.mcpPending.set(id, { resolve, reject });
-          state.mcpTerm.write(JSON.stringify(payload) + "\n");
-          setTimeout(() => {
-            if (state.mcpPending.has(id)) {
-              state.mcpPending.delete(id);
-              reject(new Error("MCP request timed out"));
+        return fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(payload),
+        })
+          .then((res) => res.text().then((text) => ({ ok: res.ok, text })))
+          .then(({ ok, text }) => {
+            if (!text) throw new Error("Empty MCP response");
+            let msg;
+            try {
+              msg = JSON.parse(text);
+            } catch (err) {
+              throw new Error("Invalid MCP JSON");
             }
-          }, 8000);
-        });
+            if (!ok || msg.error) {
+              const errMsg = msg.error?.message || "MCP request failed";
+              throw new Error(errMsg);
+            }
+            const tools = msg.result?.tools;
+            if (Array.isArray(tools)) {
+              state.mcpTools = tools.map((tool) => tool.name).filter(Boolean);
+              updateMcpStatus();
+            }
+            return msg;
+          });
       }
 
       async function connectMcp() {
-        const url = getValue("mcp-ws-url") || "ws://localhost:7681";
-        if (state.mcpWs) return;
-        const ws = new WebSocket(url);
-        state.mcpWs = ws;
+        const url = getValue("mcp-bridge-url") || "http://127.0.0.1:8081/mcp";
+        state.mcpBridgeUrl = url;
         updateMcpStatus();
-        ws.onopen = async () => {
-          const term = new window.Terminal({ rows: 24, cols: 80 });
-          const attachAddon = new window.AttachAddon.AttachAddon(ws);
-          term.loadAddon(attachAddon);
-          state.mcpTerm = term;
+        try {
           state.mcpConnected = true;
-          updateMcpStatus();
-          term.onData((data) => {
-            state.mcpBuffer += data;
-            const parts = state.mcpBuffer.split("\n");
-            state.mcpBuffer = parts.pop() || "";
-            parts.forEach((line) => {
-              if (line.trim()) handleMcpLine(line.trim());
-            });
+          await mcpSend("initialize", {
+            protocolVersion: "2024-11-05",
+            capabilities: {},
+            clientInfo: { name: "entertainme-demo", version: "1.0.0" },
           });
-          try {
-            await mcpSend("initialize", {
-              protocolVersion: "2024-11-05",
-              capabilities: {},
-              clientInfo: { name: "entertainme-demo", version: "1.0.0" },
-            });
-            await refreshMcpTools();
-          } catch (err) {
-            console.error(err);
-          }
-        };
-        ws.onerror = () => {
+          await refreshMcpTools();
+        } catch (err) {
+          console.error(err);
           state.mcpConnected = false;
           updateMcpStatus();
-        };
-        ws.onclose = () => {
-          state.mcpConnected = false;
-          state.mcpWs = null;
-          state.mcpTerm = null;
-          updateMcpStatus();
-        };
+        }
       }
 
       function disconnectMcp() {
-        if (state.mcpWs) state.mcpWs.close();
-        state.mcpWs = null;
-        state.mcpTerm = null;
+        state.mcpBridgeUrl = "";
         state.mcpConnected = false;
         updateMcpStatus();
       }
