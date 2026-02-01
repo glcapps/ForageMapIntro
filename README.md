@@ -41,10 +41,10 @@ The following constraints are intentional and should be preserved when completin
 
 ### MCP YouTube (optional)
 
-The repo includes a `youtube-mcp/` demo that exposes a YouTube MCP server via ttyd.
+The repo includes a `youtube-mcp/` demo that exposes a YouTube MCP server via an HTTP JSON-RPC bridge.
 The main demo should support MCP as an **optional** alternative source:
 
-- Add an MCP WebSocket URL input (default `ws://localhost:7681`) and Connect/Disconnect controls.
+- Add an MCP Bridge URL input (default `http://127.0.0.1:8081/mcp`) and Connect/Disconnect controls.
 - Display MCP connection status and available tool names inside the **context window**.
 - If MCP is connected and provides `search_videos`, allow the tool `fetchCandidatesMCP("query")` to use it.
 - MCP integration should be additive; the existing direct YouTube API flow remains available.
