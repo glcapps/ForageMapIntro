@@ -1,2 +1,6 @@
 youtube-mcp/.env
 *.log
+.DS_Store
+youtube-mcp/.DS_Store
+youtube-mcp/app/.DS_Store
+youtube-mcp/app/.DS_Store
